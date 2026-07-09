@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from mythings.engine import EngineRequest, EngineResult, NoopEngine
-from mythings.github import GitHub
+from mythings.github import GitHub, GitHubError
 from mythings.ledger import Ledger
 from mythings.policy import Action, Decision, PolicyResult
 
@@ -40,6 +40,24 @@ class FakeGh:
         if argv[:2] == ["issue", "edit"]:
             return ""
         raise AssertionError(f"unexpected gh call: {argv}")
+
+
+class FakeGhMissingLabel(FakeGh):
+    """Simulates a fresh repo where the 'my-idea' label doesn't exist yet."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.label_created = False
+
+    def __call__(self, argv: list[str]) -> str:
+        if argv[:2] == ["issue", "edit"] and not self.label_created:
+            self.calls.append(argv)
+            raise GitHubError("gh issue edit failed (1): label 'my-idea' not found")
+        if argv[:2] == ["label", "create"]:
+            self.calls.append(argv)
+            self.label_created = True
+            return ""
+        return super().__call__(argv)
 
 
 class ScriptedEngine:
@@ -147,3 +165,36 @@ def test_file_and_list_ideas(tmp_path: Path) -> None:
 
     ideas = list_ideas(github)
     assert [i.number for i in ideas] == [3]
+
+
+def test_file_idea_creates_missing_label_and_retries(tmp_path: Path) -> None:
+    fake = FakeGhMissingLabel()
+    github = GitHub(repo="o/r", runner=fake)
+    ledger = Ledger(tmp_path / "ledger.jsonl")
+
+    created = file_idea(
+        title="an idea", github=github, policy=AllowAll(), ledger=ledger, runner=fake
+    )
+
+    assert created is not None and created.number == 9
+    assert fake.label_created
+    edit_calls = [c for c in fake.calls if c[:2] == ["issue", "edit"]]
+    assert len(edit_calls) == 2  # first attempt failed, retry after label creation succeeded
+    label_calls = [c for c in fake.calls if c[:2] == ["label", "create"]]
+    assert label_calls == [
+        [
+            "label",
+            "create",
+            "my-idea",
+            "--description",
+            "Rough tool idea awaiting exploration",
+            "--color",
+            "fbca04",
+            "--force",
+            "--repo",
+            "o/r",
+        ]
+    ]
+
+    entries = list(Ledger(tmp_path / "ledger.jsonl"))
+    assert entries[-1].kind == "idea_filed" and entries[-1].outcome == "success"

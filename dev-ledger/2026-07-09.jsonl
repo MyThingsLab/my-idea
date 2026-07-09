@@ -1,0 +1,1 @@
+{"data":{"files":"src/myidea/explore.py,tests/test_explore.py","session":"2026-07-09"},"detail":"file_idea() now creates the my-idea label (idempotent, --force) and retries once when add_labels fails on a fresh repo that has no my-idea label yet","kind":"fix","outcome":"success","tool":"claude-code","ts":"2026-07-09T15:21:23Z"}
