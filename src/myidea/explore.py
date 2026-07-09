@@ -7,11 +7,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from mythings.engine import Engine, EngineRequest
-from mythings.github import GitHub, Issue
+from mythings.github import GitHub, GitHubError, Issue
 from mythings.ledger import Ledger
 from mythings.policy import Action, Decision, Policy
 
 IDEA_LABEL = "my-idea"
+IDEA_LABEL_DESCRIPTION = "Rough tool idea awaiting exploration"
+IDEA_LABEL_COLOR = "fbca04"
 ORG = "MyThingsLab"
 CORE_REPO = "my-things-core"
 MAX_GROUNDING = 50
@@ -215,6 +217,22 @@ def explore(
     return ExploreResult(idea_issue=issue, verdict=brief.verdict, posted=posted, comment=comment)
 
 
+def _ensure_idea_label(runner: Runner, repo: str | None) -> None:
+    argv = [
+        "label",
+        "create",
+        IDEA_LABEL,
+        "--description",
+        IDEA_LABEL_DESCRIPTION,
+        "--color",
+        IDEA_LABEL_COLOR,
+        "--force",
+    ]
+    if repo:
+        argv += ["--repo", repo]
+    runner(argv)
+
+
 def file_idea(
     *,
     title: str,
@@ -222,12 +240,19 @@ def file_idea(
     policy: Policy,
     ledger: Ledger,
     body: str = "",
+    runner: Runner = _gh,
 ) -> Issue | None:
     action = Action(kind="issue-create", payload={"title": title, "label": IDEA_LABEL})
     if policy.evaluate(action).under(unattended=True) is not Decision.ALLOW:
         return None
     created = github.create_issue(title=title, body=body or "(filed via myidea new)")
-    github.add_labels(created.number, [IDEA_LABEL])
+    try:
+        github.add_labels(created.number, [IDEA_LABEL])
+    except GitHubError:
+        # First idea filed against a fresh repo: the "my-idea" label doesn't
+        # exist yet. Create it (idempotent via --force) and retry once.
+        _ensure_idea_label(runner, github.repo)
+        github.add_labels(created.number, [IDEA_LABEL])
     ledger.record(
         "myidea",
         "idea_filed",
