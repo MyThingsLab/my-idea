@@ -27,16 +27,18 @@ Design plan: [`my-things-core/docs/tools/my-idea.md`](https://github.com/MyThing
 myidea new "a tool that turns voice memos into backlog issues"
 myidea list
 myidea explore --issue 3 --engine claude-cli
-myidea explore --issue 3 --engine claude-cli --no-web   # fleet-only, skip web prior art
-myidea explore --issue 3 --engine noop --local-only     # deterministic, no side effects
+myidea explore --issue 3 --engine claude-cli --local-only        # full preview, no writes
+myidea explore --issue 3 --engine claude-cli --no-web            # fleet-only, skip web prior art
+myidea explore --issue 3 --engine noop --local-only --no-web     # deterministic, network-free
 ```
 
 - `new` files a `my-idea`-labeled issue (through `Policy`).
 - `list` prints the open ideas.
 - `explore` posts the brief as an issue comment (through `Policy`), and on the
-  `merge` verdict files one consolidated idea; `--local-only` prints the brief
-  instead and touches nothing remote (no comment, no filed issue, no web).
-  `--no-web` skips the my-librarian web cross-reference (fleet-only). Against
+  `merge` verdict files one consolidated idea. `--local-only` performs **no
+  writes** — it prints the brief instead (still reading the web unless
+  `--no-web` is given, so it doubles as a full-fidelity preview). `--no-web`
+  skips the my-librarian web cross-reference (fleet-only). Against
   `--engine noop` the brief carries only the deterministic grounding —
   fleet/description overlaps, the similar-idea cluster, and web candidates —
   with no fabricated judgment.

@@ -222,13 +222,51 @@ def _parse_merge_proposal(payload: dict, similar_numbers: set[int]) -> MergeProp
     )
 
 
+def _grounded_prompt(
+    idea: Issue, grounding: Grounding, similar: list[tuple[SiblingIdea, list[str]]]
+) -> str:
+    lines = [f"Idea issue #{idea.number}: {idea.title}", "", idea.body or "(no description)", ""]
+
+    lines.append("Fleet tools (org repos — cite overlaps only from these):")
+    for tool in grounding.org_tools:
+        desc = grounding.tool_descriptions.get(tool, "")
+        lines.append(f"- {tool}" + (f": {desc}" if desc else ""))
+    if grounding.designed_tools:
+        lines.append("")
+        lines.append("Designed-but-unbuilt tools (also citable):")
+        lines += [f"- {t}" for t in grounding.designed_tools]
+
+    lines.append("")
+    if grounding.web_candidates:
+        lines.append("Prior art on the web (cite prior_art only from these):")
+        for c in grounding.web_candidates:
+            rel = f", last release {c.last_release}" if c.last_release else ""
+            lines.append(f"- {c.name} ({c.registry}, license={c.license}{rel}): {c.description}")
+    else:
+        lines.append("Prior art on the web: none discovered.")
+
+    lines.append("")
+    if similar:
+        lines.append("Similar open ideas (merge_proposal.absorbs may only use these numbers):")
+        for sibling, shared in similar:
+            lines.append(f"- #{sibling.number} {sibling.title} — shares: {', '.join(shared)}")
+    else:
+        lines.append("Similar open ideas: none — do not propose a merge.")
+
+    return "\n".join(lines)
+
+
 def _propose_brief(
     engine: Engine,
     idea: Issue,
     grounding: Grounding,
     similar: list[tuple[SiblingIdea, list[str]]],
 ) -> Brief:
-    prompt = f"Idea issue #{idea.number}: {idea.title}\n\n{idea.body}"
+    # The grounding goes in the PROMPT, not just context: ClaudeCLIEngine
+    # transmits only system+prompt to the model, so anything the model must
+    # cross-reference and cite from has to be inline here (same discipline as
+    # my-librarian's candidate list). context stays for the cache key / echo.
+    prompt = _grounded_prompt(idea, grounding, similar)
     context = {
         "idea_issue": idea.number,
         "org_tools": grounding.org_tools,
@@ -366,13 +404,16 @@ def explore(
     registries: tuple[str, ...] = WEB_REGISTRIES,
 ) -> ExploreResult:
     idea = _find_idea_issue(github, issue)
+    # Web retrieval is read-only, so it stays on under --local-only: the preview
+    # shows the full brief (fleet + web + merge). --no-web is the opt-out; writes
+    # are what --local-only suppresses, below.
     grounding = gather_grounding(
         github,
         idea,
         runner=runner,
         org=org,
         fetch=fetch,
-        use_web=use_web and not local_only,
+        use_web=use_web,
         registries=registries,
     )
     similar = similar_ideas(idea, grounding.sibling_ideas)

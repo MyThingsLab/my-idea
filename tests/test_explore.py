@@ -140,6 +140,17 @@ def test_explore_posts_brief_and_filters_unknown_overlaps(tmp_path: Path) -> Non
     assert entries[-1].kind == "idea_explored" and entries[-1].outcome == "success"
 
 
+def test_grounding_is_carried_in_the_prompt_not_just_context(tmp_path: Path) -> None:
+    # ClaudeCLIEngine transmits only system+prompt, so the grounding the model
+    # must cite from has to be inline in the prompt.
+    fake = FakeGh()
+    engine = ScriptedEngine(BRIEF)
+    _explore(fake, engine, AllowAll(), tmp_path)
+    (request,) = engine.calls
+    assert "my-scraper" in request.prompt  # fleet tool reached the model
+    assert "fetches and cleans web pages" in request.prompt  # ...with its description
+
+
 def test_noop_engine_degrades_to_grounding_only(tmp_path: Path) -> None:
     fake = FakeGh()
     result = _explore(fake, NoopEngine(), AllowAll(), tmp_path, local_only=True)
@@ -299,6 +310,17 @@ def test_explore_renders_web_prior_art(tmp_path: Path) -> None:
     )
     assert "Prior art on the web" in result.comment
     assert "feedparser" in result.comment
+
+
+def test_local_only_previews_web_but_writes_nothing(tmp_path: Path) -> None:
+    fake = FakeGh()
+    payload = {**BRIEF, "prior_art": [{"package": "feedparser", "why": "already parses feeds"}]}
+    result = _explore(
+        fake, ScriptedEngine(payload), AllowAll(), tmp_path,
+        local_only=True, use_web=True, fetch=_fake_fetch, registries=("npm",),
+    )
+    assert not result.posted and fake.comments == []  # no writes under --local-only
+    assert "feedparser" in result.comment  # but the web preview still renders
 
 
 def test_similar_ideas_clusters_on_shared_tokens() -> None:

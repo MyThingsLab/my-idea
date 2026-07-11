@@ -26,14 +26,17 @@ covered here defers to `HARNESS.md`, then `my-things-core/docs/CONVENTIONS.md`.
   fabricated judgment.
 - **Web cross-reference:** best-effort and read-only — my-librarian's LLM-free
   HTTP retrieval. A network error degrades to fleet-only (never fails the run);
-  `--no-web` and `--local-only` skip it entirely (the deterministic Verify
-  path). The HTTP boundary is injectable (`fetch`) and mocked in tests.
+  `--no-web` opts out. Because it is read-only it still runs under
+  `--local-only` (a full-fidelity preview); the HTTP boundary is injectable
+  (`fetch`) and mocked in tests.
 - **Invariants / rules:** comment-only *except* the `merge` verdict, which may
   file **one** consolidated `my-idea` issue through `Policy` (the absorbed
   siblings are cross-linked by `#N` in its body); still exactly one Engine call
   per run; never opens PRs or edits code; grounding lists are size-capped;
-  `--local-only` touches nothing remote (no comment, no filed issue, no web).
+  `--local-only` performs **no writes** (no comment, no filed issue) — it may
+  still read the web unless `--no-web` is also given.
 - **Backlog label:** `my-idea`
-- **Verify:** `myidea explore --issue <n> --engine noop --local-only` (prints
-  the deterministic brief, no side effects, no network); `myidea list` for the
+- **Verify:** `myidea explore --issue <n> --engine noop --local-only --no-web`
+  (deterministic, network-free, no side effects); drop `--no-web` for a live
+  read-only preview that includes web prior art; `myidea list` for the
   read-only path.
