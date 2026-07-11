@@ -8,19 +8,32 @@ covered here defers to `HARNESS.md`, then `my-things-core/docs/CONVENTIONS.md`.
 
 ## This tool
 
-- **Purpose:** explores a rough idea (a `my-idea`-labeled issue) against the
-  existing fleet and posts a structured exploration brief back on the issue —
-  restatement, overlaps, contract fit, risks, smallest buildable slice,
-  verdict (build / park / fold), probing questions.
-- **The single Engine call:** "explore this idea against this fleet" — grounded
-  in deterministically gathered org repos, design-plan titles, and sibling
-  ideas; overlaps may only cite tools from that grounding. Against `NoopEngine`
-  the brief renders only the keyword-matched grounding, never fabricated
-  judgment.
-- **Invariants / rules:** comment-only side effects, through `Policy`; never
-  files issues or opens PRs on its own (v0); grounding lists are size-capped;
-  `--local-only` must touch nothing remote.
+- **Purpose:** explores a rough idea (a `my-idea`-labeled issue) by
+  auto-cross-referencing it against the existing fleet **and** prior art on the
+  public web (via my-librarian), then posts a structured brief back on the
+  issue — restatement, fleet overlaps, web prior art, contract fit, risks,
+  smallest buildable slice, verdict (build / park / fold / **merge**), and, when
+  several open ideas cluster, a **consolidation** proposal for a single more
+  general tool.
+- **The single Engine call:** "explore this idea against this fleet and the
+  web" — grounded in deterministically gathered org repos **and their
+  descriptions**, design-plan titles, sibling ideas (with token-overlap
+  similarity clustering), and my-librarian's live PyPI/npm candidates. Overlaps
+  may only cite grounding tools; `prior_art` only web candidates;
+  `merge_proposal.absorbs` only issue numbers from the detected similar set.
+  Against `NoopEngine` the brief renders only the deterministic grounding
+  (keyword+description overlaps, similar-idea cluster, web candidates), never
+  fabricated judgment.
+- **Web cross-reference:** best-effort and read-only — my-librarian's LLM-free
+  HTTP retrieval. A network error degrades to fleet-only (never fails the run);
+  `--no-web` and `--local-only` skip it entirely (the deterministic Verify
+  path). The HTTP boundary is injectable (`fetch`) and mocked in tests.
+- **Invariants / rules:** comment-only *except* the `merge` verdict, which may
+  file **one** consolidated `my-idea` issue through `Policy` (the absorbed
+  siblings are cross-linked by `#N` in its body); still exactly one Engine call
+  per run; never opens PRs or edits code; grounding lists are size-capped;
+  `--local-only` touches nothing remote (no comment, no filed issue, no web).
 - **Backlog label:** `my-idea`
 - **Verify:** `myidea explore --issue <n> --engine noop --local-only` (prints
-  the deterministic brief, no side effects); `myidea list` for the read-only
-  path.
+  the deterministic brief, no side effects, no network); `myidea list` for the
+  read-only path.

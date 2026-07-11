@@ -31,6 +31,7 @@ jobs:
         run: |
           pip install "my-things-core @ git+https://github.com/${{ github.repository_owner }}/my-things-core@main"
           pip install "my-guard @ git+https://github.com/${{ github.repository_owner }}/my-guard@main"
+          pip install "my-librarian @ git+https://github.com/${{ github.repository_owner }}/my-librarian@main"
       - name: Install
         run: pip install -e ".[dev]"
       - name: Ruff
