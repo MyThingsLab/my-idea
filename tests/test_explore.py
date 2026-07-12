@@ -8,7 +8,16 @@ from mythings.github import GitHub, GitHubError
 from mythings.ledger import Ledger
 from mythings.policy import Action, Decision, PolicyResult
 
-from myidea.explore import explore, file_idea, keyword_overlaps, list_ideas
+from myidea.explore import (
+    Grounding,
+    SiblingIdea,
+    explore,
+    file_idea,
+    keyword_overlaps,
+    list_ideas,
+    similar_ideas,
+    web_cross_reference,
+)
 
 IDEA_ISSUE = {
     "number": 3,
@@ -29,7 +38,12 @@ class FakeGh:
         if argv[:2] == ["issue", "list"]:
             return json.dumps([IDEA_ISSUE])
         if argv[:2] == ["repo", "list"]:
-            return json.dumps([{"name": "my-scraper"}, {"name": "my-things-core"}])
+            return json.dumps(
+                [
+                    {"name": "my-scraper", "description": "fetches and cleans web pages"},
+                    {"name": "my-things-core", "description": None},
+                ]
+            )
         if argv[0] == "api" and "contents/docs/tools" in argv[1]:
             return "my-dashboard.md\nmy-news.md\nREADME.md\n"
         if argv[:2] == ["issue", "comment"]:
@@ -96,6 +110,7 @@ BRIEF = {
 
 
 def _explore(fake: FakeGh, engine, policy, tmp_path: Path, **kwargs):
+    kwargs.setdefault("use_web", False)  # no live HTTP unless a test opts in with a fake fetch
     return explore(
         issue=3,
         engine=engine,
@@ -123,6 +138,17 @@ def test_explore_posts_brief_and_filters_unknown_overlaps(tmp_path: Path) -> Non
 
     entries = list(Ledger(tmp_path / "ledger.jsonl"))
     assert entries[-1].kind == "idea_explored" and entries[-1].outcome == "success"
+
+
+def test_grounding_is_carried_in_the_prompt_not_just_context(tmp_path: Path) -> None:
+    # ClaudeCLIEngine transmits only system+prompt, so the grounding the model
+    # must cite from has to be inline in the prompt.
+    fake = FakeGh()
+    engine = ScriptedEngine(BRIEF)
+    _explore(fake, engine, AllowAll(), tmp_path)
+    (request,) = engine.calls
+    assert "my-scraper" in request.prompt  # fleet tool reached the model
+    assert "fetches and cleans web pages" in request.prompt  # ...with its description
 
 
 def test_noop_engine_degrades_to_grounding_only(tmp_path: Path) -> None:
@@ -198,3 +224,165 @@ def test_file_idea_creates_missing_label_and_retries(tmp_path: Path) -> None:
 
     entries = list(Ledger(tmp_path / "ledger.jsonl"))
     assert entries[-1].kind == "idea_filed" and entries[-1].outcome == "success"
+
+
+def _issue(number: int, title: str, body: str = "") -> dict:
+    return {
+        "number": number,
+        "title": title,
+        "body": body,
+        "url": f"https://github.com/o/r/issues/{number}",
+        "labels": [{"name": "my-idea"}],
+    }
+
+
+class FakeGhWithSibling(FakeGh):
+    """Issue list carries a second, similar open idea for clustering/merge."""
+
+    SIBLING = _issue(4, "a research feed aggregator dashboard", "watches feeds all day")
+
+    def __call__(self, argv: list[str]) -> str:
+        if argv[:2] == ["issue", "list"]:
+            return json.dumps([IDEA_ISSUE, self.SIBLING])
+        return super().__call__(argv)
+
+
+def _npm_payload(name: str, description: str) -> bytes:
+    return json.dumps(
+        {
+            "objects": [
+                {
+                    "package": {
+                        "name": name,
+                        "description": description,
+                        "license": "MIT",
+                        "links": {"npm": f"https://www.npmjs.com/package/{name}"},
+                        "date": "2025-01-01",
+                    },
+                    "score": {"detail": {"popularity": 0.8}},
+                }
+            ]
+        }
+    ).encode()
+
+
+def _fake_fetch(url: str, *, data=None, headers=None) -> bytes:
+    if "registry.npmjs.org" in url:
+        return _npm_payload("feedparser", "parse RSS/Atom feeds")
+    raise AssertionError(f"unexpected web fetch: {url}")
+
+
+def test_keyword_overlaps_matches_tool_description(tmp_path: Path) -> None:
+    grounding = Grounding(
+        org_tools=["my-scraper"],
+        designed_tools=[],
+        tool_descriptions={"my-scraper": "fetches and cleans web pages"},
+    )
+    overlaps = keyword_overlaps("a tool that cleans messy pages", grounding)
+    assert overlaps and overlaps[0]["tool"] == "my-scraper"
+    assert "cleans" in overlaps[0]["why"]  # matched on description, not the name
+
+
+def test_web_cross_reference_returns_candidates() -> None:
+    from mythings.github import Issue
+
+    idea = Issue(number=3, title="watch research feeds", body="", url="", labels=["my-idea"])
+    candidates = web_cross_reference(idea, fetch=_fake_fetch, registries=("npm",))
+    assert [c.name for c in candidates] == ["feedparser"]
+
+
+def test_web_cross_reference_degrades_on_network_error() -> None:
+    from mythings.github import Issue
+
+    def boom(url: str, *, data=None, headers=None) -> bytes:
+        raise OSError("no network")
+
+    idea = Issue(number=3, title="watch research feeds", body="", url="", labels=["my-idea"])
+    assert web_cross_reference(idea, fetch=boom, registries=("npm",)) == []
+
+
+def test_explore_renders_web_prior_art(tmp_path: Path) -> None:
+    fake = FakeGh()
+    payload = {**BRIEF, "prior_art": [{"package": "feedparser", "why": "already parses feeds"}]}
+    result = _explore(
+        fake, ScriptedEngine(payload), AllowAll(), tmp_path,
+        use_web=True, fetch=_fake_fetch, registries=("npm",),
+    )
+    assert "Prior art on the web" in result.comment
+    assert "feedparser" in result.comment
+
+
+def test_local_only_previews_web_but_writes_nothing(tmp_path: Path) -> None:
+    fake = FakeGh()
+    payload = {**BRIEF, "prior_art": [{"package": "feedparser", "why": "already parses feeds"}]}
+    result = _explore(
+        fake, ScriptedEngine(payload), AllowAll(), tmp_path,
+        local_only=True, use_web=True, fetch=_fake_fetch, registries=("npm",),
+    )
+    assert not result.posted and fake.comments == []  # no writes under --local-only
+    assert "feedparser" in result.comment  # but the web preview still renders
+
+
+def test_similar_ideas_clusters_on_shared_tokens() -> None:
+    from mythings.github import Issue
+
+    idea = Issue(
+        number=3, title="a scraper dashboard for research feeds", body="", url="", labels=[]
+    )
+    siblings = [
+        SiblingIdea(4, "a research feed aggregator dashboard", "watches feeds"),
+        SiblingIdea(5, "a raytracer for glass", "unrelated"),
+    ]
+    similar = similar_ideas(idea, siblings)
+    assert [s.number for s, _ in similar] == [4]  # only the overlapping one
+
+
+def test_merge_verdict_files_consolidated_idea(tmp_path: Path) -> None:
+    fake = FakeGhWithSibling()
+    merge_brief = {
+        **BRIEF,
+        "verdict": "merge",
+        "merge_proposal": {
+            "general_tool": "my-feedhub",
+            "absorbs": [4],
+            "rationale": "One feed hub beats two narrow tools.",
+        },
+    }
+    engine = ScriptedEngine(merge_brief)
+    result = _explore(fake, engine, AllowAll(), tmp_path)
+
+    assert len(engine.calls) == 1  # merge is still a single Engine call
+    assert result.verdict == "merge"
+    assert result.filed_merge == 9  # FakeGh issue-create returns #9
+    creates = [c for c in fake.calls if c[:2] == ["issue", "create"]]
+    body = creates[0][creates[0].index("--body") + 1]
+    assert "#4" in body  # absorbed sibling cross-linked in the consolidated issue
+    announce = [c for c in fake.comments if "#9" in c]
+    assert announce and "my-feedhub" in announce[0]
+
+    entries = list(Ledger(tmp_path / "ledger.jsonl"))
+    kinds = [e.kind for e in entries]
+    assert "idea_filed" in kinds and kinds[-1] == "idea_explored"
+
+
+def test_tool_slug_trims_descriptive_general_tool() -> None:
+    from myidea.explore import _tool_slug
+
+    assert _tool_slug("my-agenda — a single personal-time tool: given a backlog") == "my-agenda"
+    assert _tool_slug("my-feedhub") == "my-feedhub"
+    assert _tool_slug("my-hub: does things") == "my-hub"
+
+
+def test_merge_proposal_absorbs_only_similar_ideas(tmp_path: Path) -> None:
+    fake = FakeGhWithSibling()
+    # Model names an issue (#99) that is not in the deterministic similar set.
+    merge_brief = {
+        **BRIEF,
+        "verdict": "merge",
+        "merge_proposal": {"general_tool": "my-feedhub", "absorbs": [4, 99], "rationale": "x"},
+    }
+    result = _explore(fake, ScriptedEngine(merge_brief), AllowAll(), tmp_path)
+    creates = [c for c in fake.calls if c[:2] == ["issue", "create"]]
+    body = creates[0][creates[0].index("--body") + 1]
+    assert "#4" in body and "#99" not in body  # invented cross-link dropped
+    assert result.filed_merge == 9

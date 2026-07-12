@@ -31,6 +31,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--repo", default=None)
     ex.add_argument("--engine", choices=sorted(_ENGINES), default="noop")
     ex.add_argument("--local-only", action="store_true", help="print the brief; no side effects")
+    ex.add_argument(
+        "--no-web",
+        action="store_true",
+        help="skip my-librarian web prior-art cross-reference (fleet-only)",
+    )
     return parser
 
 
@@ -66,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             ledger=ledger,
             repo=args.repo,
             local_only=args.local_only,
+            use_web=not args.no_web,
         )
     except ValueError as exc:
         print(f"myidea: {exc}", flush=True)
