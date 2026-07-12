@@ -149,6 +149,18 @@ def test_grounding_is_carried_in_the_prompt_not_just_context(tmp_path: Path) -> 
     assert "fetches and cleans web pages" in request.prompt  # ...with its description
 
 
+def test_unparsable_engine_reply_degrades_to_grounding_only(tmp_path: Path) -> None:
+    # A model reply that still isn't valid JSON (fence-stripping happens
+    # upstream in ClaudeCLIEngine; this is the belt-and-suspenders path for
+    # whatever gets through anyway) must degrade honestly, not raise.
+    fake = FakeGh()
+    engine = ScriptedEngine("not json at all")
+    result = _explore(fake, engine, AllowAll(), tmp_path, local_only=True)
+
+    assert "No judgment engine attached" in result.comment
+    assert "my-scraper" in result.comment
+
+
 def test_noop_engine_degrades_to_grounding_only(tmp_path: Path) -> None:
     fake = FakeGh()
     result = _explore(fake, NoopEngine(), AllowAll(), tmp_path, local_only=True)
@@ -321,6 +333,20 @@ def test_local_only_previews_web_but_writes_nothing(tmp_path: Path) -> None:
     assert "feedparser" in result.comment  # but the web preview still renders
 
 
+def test_noop_engine_deterministic_render_includes_web_and_similar(tmp_path: Path) -> None:
+    # Covers render_brief's deterministic_only branches: with no Engine attached,
+    # the web prior-art candidates and similar open ideas still render straight
+    # from grounding (nothing fabricated, but the raw signal isn't hidden either).
+    fake = FakeGhWithSibling()
+    result = _explore(
+        fake, NoopEngine(), AllowAll(), tmp_path,
+        local_only=True, use_web=True, fetch=_fake_fetch, registries=("npm",),
+    )
+    assert "No judgment engine attached" in result.comment
+    assert "feedparser" in result.comment  # web candidate rendered from grounding
+    assert "#4 a research feed aggregator dashboard" in result.comment  # similar idea listed
+
+
 def test_similar_ideas_clusters_on_shared_tokens() -> None:
     from mythings.github import Issue
 
@@ -333,6 +359,13 @@ def test_similar_ideas_clusters_on_shared_tokens() -> None:
     ]
     similar = similar_ideas(idea, siblings)
     assert [s.number for s, _ in similar] == [4]  # only the overlapping one
+
+
+def test_parse_merge_proposal_ignores_blank_general_tool() -> None:
+    from myidea.explore import _parse_merge_proposal
+
+    payload = {"merge_proposal": {"general_tool": "  ", "absorbs": [4], "rationale": "x"}}
+    assert _parse_merge_proposal(payload, {4}) is None
 
 
 def test_merge_verdict_files_consolidated_idea(tmp_path: Path) -> None:
