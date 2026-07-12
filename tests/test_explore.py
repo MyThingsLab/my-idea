@@ -365,6 +365,14 @@ def test_merge_verdict_files_consolidated_idea(tmp_path: Path) -> None:
     assert "idea_filed" in kinds and kinds[-1] == "idea_explored"
 
 
+def test_tool_slug_trims_descriptive_general_tool() -> None:
+    from myidea.explore import _tool_slug
+
+    assert _tool_slug("my-agenda — a single personal-time tool: given a backlog") == "my-agenda"
+    assert _tool_slug("my-feedhub") == "my-feedhub"
+    assert _tool_slug("my-hub: does things") == "my-hub"
+
+
 def test_merge_proposal_absorbs_only_similar_ideas(tmp_path: Path) -> None:
     fake = FakeGhWithSibling()
     # Model names an issue (#99) that is not in the deterministic similar set.

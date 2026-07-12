@@ -363,7 +363,7 @@ def render_brief(
         mp = brief.merge_proposal
         absorbs = ", ".join(f"#{n}" for n in mp.absorbs) or "none named"
         lines += [
-            f"**Consolidation:** merge into a more general tool `{mp.general_tool}`"
+            f"**Consolidation:** merge into a more general tool `{_tool_slug(mp.general_tool)}`"
             f" (absorbs {absorbs}).",
         ]
         if mp.rationale:
@@ -378,10 +378,18 @@ def render_brief(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _tool_slug(general_tool: str) -> str:
+    # Models tend to answer general_tool with "my-agenda — a whole paragraph…";
+    # keep just the leading slug for the issue title, the rest lands in the body.
+    head = re.split(r"[—–:.\n]", general_tool.strip(), maxsplit=1)[0].strip()
+    return (head or general_tool.strip())[:60]
+
+
 def _merge_body(idea: Issue, mp: MergeProposal) -> str:
     absorbed = "\n".join(f"- #{n}" for n in mp.absorbs) or "- (none named)"
     return (
         f"Consolidated tool proposed by `myidea explore` from idea #{idea.number}.\n\n"
+        f"**Concept:** {mp.general_tool}\n\n"
         f"{mp.rationale}\n\n"
         f"**Absorbs these open ideas:**\n{absorbed}\n\n"
         f"_A more general tool than any of the above alone._"
@@ -434,7 +442,7 @@ def explore(
                     runner,
                     issue,
                     f"🔀 Filed consolidated idea #{filed_merge}: "
-                    f"`{brief.merge_proposal.general_tool}`.",
+                    f"`{_tool_slug(brief.merge_proposal.general_tool)}`.",
                     repo,
                 )
 
@@ -469,7 +477,7 @@ def _file_merge(
     idea: Issue, mp: MergeProposal, github: GitHub, policy: Policy, ledger: Ledger
 ) -> int | None:
     created = file_idea(
-        title=mp.general_tool,
+        title=_tool_slug(mp.general_tool),
         github=github,
         policy=policy,
         ledger=ledger,
