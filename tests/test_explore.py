@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mythings.engine import EngineRequest, EngineResult, NoopEngine
+from mythings.engine import NoopEngine
 from mythings.github import GitHub, GitHubError
 from mythings.ledger import Ledger
 from mythings.policy import Action, Decision, PolicyResult
+from mythings.testing import ScriptedEngine
 
 from myidea.explore import (
     Grounding,
@@ -74,14 +75,11 @@ class FakeGhMissingLabel(FakeGh):
         return super().__call__(argv)
 
 
-class ScriptedEngine:
-    def __init__(self, payload: dict) -> None:
-        self.payload = payload
-        self.calls: list[EngineRequest] = []
+def scripted(payload: dict) -> ScriptedEngine:
+    return ScriptedEngine(json.dumps(payload))
 
-    def run(self, request: EngineRequest) -> EngineResult:
-        self.calls.append(request)
-        return EngineResult(text=json.dumps(self.payload))
+
+
 
 
 class AllowAll:
@@ -125,7 +123,7 @@ def _explore(fake: FakeGh, engine, policy, tmp_path: Path, **kwargs):
 
 def test_explore_posts_brief_and_filters_unknown_overlaps(tmp_path: Path) -> None:
     fake = FakeGh()
-    engine = ScriptedEngine(BRIEF)
+    engine = scripted(BRIEF)
     result = _explore(fake, engine, AllowAll(), tmp_path)
 
     assert result.posted and result.verdict == "fold"
@@ -144,7 +142,7 @@ def test_grounding_is_carried_in_the_prompt_not_just_context(tmp_path: Path) -> 
     # ClaudeCLIEngine transmits only system+prompt, so the grounding the model
     # must cite from has to be inline in the prompt.
     fake = FakeGh()
-    engine = ScriptedEngine(BRIEF)
+    engine = scripted(BRIEF)
     _explore(fake, engine, AllowAll(), tmp_path)
     (request,) = engine.calls
     assert "my-scraper" in request.prompt  # fleet tool reached the model
@@ -163,7 +161,7 @@ def test_noop_engine_degrades_to_grounding_only(tmp_path: Path) -> None:
 
 def test_policy_deny_blocks_comment_but_records_honestly(tmp_path: Path) -> None:
     fake = FakeGh()
-    result = _explore(fake, ScriptedEngine(BRIEF), DenyAll(), tmp_path)
+    result = _explore(fake, scripted(BRIEF), DenyAll(), tmp_path)
 
     assert not result.posted and fake.comments == []
     entries = list(Ledger(tmp_path / "ledger.jsonl"))
@@ -305,7 +303,7 @@ def test_explore_renders_web_prior_art(tmp_path: Path) -> None:
     fake = FakeGh()
     payload = {**BRIEF, "prior_art": [{"package": "feedparser", "why": "already parses feeds"}]}
     result = _explore(
-        fake, ScriptedEngine(payload), AllowAll(), tmp_path,
+        fake, scripted(payload), AllowAll(), tmp_path,
         use_web=True, fetch=_fake_fetch, registries=("npm",),
     )
     assert "Prior art on the web" in result.comment
@@ -316,7 +314,7 @@ def test_local_only_previews_web_but_writes_nothing(tmp_path: Path) -> None:
     fake = FakeGh()
     payload = {**BRIEF, "prior_art": [{"package": "feedparser", "why": "already parses feeds"}]}
     result = _explore(
-        fake, ScriptedEngine(payload), AllowAll(), tmp_path,
+        fake, scripted(payload), AllowAll(), tmp_path,
         local_only=True, use_web=True, fetch=_fake_fetch, registries=("npm",),
     )
     assert not result.posted and fake.comments == []  # no writes under --local-only
@@ -348,7 +346,7 @@ def test_merge_verdict_files_consolidated_idea(tmp_path: Path) -> None:
             "rationale": "One feed hub beats two narrow tools.",
         },
     }
-    engine = ScriptedEngine(merge_brief)
+    engine = scripted(merge_brief)
     result = _explore(fake, engine, AllowAll(), tmp_path)
 
     assert len(engine.calls) == 1  # merge is still a single Engine call
@@ -381,7 +379,7 @@ def test_merge_proposal_absorbs_only_similar_ideas(tmp_path: Path) -> None:
         "verdict": "merge",
         "merge_proposal": {"general_tool": "my-feedhub", "absorbs": [4, 99], "rationale": "x"},
     }
-    result = _explore(fake, ScriptedEngine(merge_brief), AllowAll(), tmp_path)
+    result = _explore(fake, scripted(merge_brief), AllowAll(), tmp_path)
     creates = [c for c in fake.calls if c[:2] == ["issue", "create"]]
     body = creates[0][creates[0].index("--body") + 1]
     assert "#4" in body and "#99" not in body  # invented cross-link dropped
