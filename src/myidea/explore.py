@@ -6,11 +6,13 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from mylibrarian.registries import Candidate, Fetcher, _http, retrieve
 from mythings.engine import Engine, EngineRequest
 from mythings.github import GitHub, GitHubError, Issue
 from mythings.ledger import Ledger
 from mythings.policy import Action, Decision, Policy
+
+from myidea.webregistry import Candidate, Fetcher, retrieve
+from myidea.webregistry import http_get as _http
 
 IDEA_LABEL = "my-idea"
 IDEA_LABEL_DESCRIPTION = "Rough tool idea awaiting exploration"
